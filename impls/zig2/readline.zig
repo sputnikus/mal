@@ -10,8 +10,6 @@ const rl_hist = @cImport({
 const free = @import("std").c.free;
 const addNullByte = @import("std").cstr.addNullByte;
 
-const warn = @import("std").debug.warn;
-
 pub fn slice_from_cstr(allocator: Allocator, str: [*]const u8) ![]u8 {
     var length: usize = 0;
     while (true) {

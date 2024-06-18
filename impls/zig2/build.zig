@@ -15,12 +15,20 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const exes = [_]*std.Build.Step.Compile{b.addExecutable(.{
-        .name = "step0_repl",
-        .root_source_file = b.path("step0_repl.zig"),
-        .target = target,
-        .optimize = optimize,
-    })};
+    const exes = [_]*std.Build.Step.Compile{
+        b.addExecutable(.{
+            .name = "step0_repl",
+            .root_source_file = b.path("step0_repl.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        b.addExecutable(.{
+            .name = "step1_read_print",
+            .root_source_file = b.path("step1_read_print.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    };
 
     for (exes) |exe| {
         exe.linkLibC();
