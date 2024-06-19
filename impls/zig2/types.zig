@@ -9,6 +9,7 @@ pub const MalLinkedList = ArrayList(*MalType);
 
 pub const MalTypeValue = enum {
     Bool,
+    Generic,
     Int,
     List,
     Nil,
@@ -18,6 +19,7 @@ pub const MalTypeValue = enum {
 
 pub const MalData = union(MalTypeValue) {
     Bool: bool,
+    Generic: []const u8,
     Int: i64,
     List: MalLinkedList,
     Nil: void,
@@ -41,6 +43,15 @@ pub const MalType = struct {
     pub fn new_bool(allocator: @TypeOf(Allocator), value: bool) MalErr!*MalType {
         const mal_type = try MalType.init(allocator);
         mal_type.data = MalData{ .Bool = value };
+        return mal_type;
+    }
+
+    pub fn new_generic(allocator: @TypeOf(Allocator), value: []const u8) MalErr!*MalType {
+        const mal_type = try MalType.init(allocator);
+        errdefer allocator.destroy(mal_type);
+        const value_copy = mem.Allocator.dupe(allocator, u8, value) catch return MalErr.OutOfMemory;
+        errdefer allocator.destroy(value_copy);
+        mal_type.data = MalData{ .Generic = value_copy };
         return mal_type;
     }
 

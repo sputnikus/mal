@@ -6,6 +6,7 @@ pub const pcre = @cImport({
 
 const Allocator = @import("std").heap.c_allocator;
 const ArrayList = @import("std").ArrayList;
+const aliases = @import("aliases.zig");
 const MalData = @import("types.zig").MalData;
 const MalErr = @import("error.zig").MalErr;
 const MalLinkedList = @import("types.zig").MalLinkedList;
@@ -108,6 +109,8 @@ pub fn read_form(reader: *Reader) MalErr!?*MalType {
     const token = reader.peek();
     if (token[0] == '(') {
         return read_list(reader);
+    } else if (aliases.is_alias(token[0])) {
+        return read_macro(reader);
     }
 
     return read_atom(reader);
@@ -189,4 +192,31 @@ fn read_string(token: []const u8) MalErr!*MalType {
 
     const clean_string = result_string.toOwnedSlice() catch return MalErr.OutOfMemory;
     return MalType.new_string(Allocator, clean_string);
+}
+
+fn read_macro(reader: *Reader) MalErr!?*MalType {
+    const token = reader.peek();
+
+    for (aliases.macros) |macro| {
+        const name = macro.name;
+        const value = macro.value;
+        const count = macro.count;
+        if (!std.mem.eql(u8, token, name)) {
+            continue;
+        }
+        var new_list = MalLinkedList.init(Allocator);
+        errdefer new_list.deinit();
+        const new_generic = try MalType.new_generic(Allocator, value);
+        _ = reader.next();
+        var num_read: u8 = 0;
+        while (num_read < count) {
+            const next_read = (try read_form(reader)) orelse return MalErr.BadInput;
+            try new_list.insert(0, next_read);
+            num_read += 1;
+        }
+        try new_list.insert(0, new_generic);
+        return MalType.new_list(Allocator, new_list);
+    }
+
+    return null;
 }
