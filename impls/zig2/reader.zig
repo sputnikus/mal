@@ -5,6 +5,7 @@ pub const pcre = @cImport({
 });
 
 const Allocator = @import("std").heap.c_allocator;
+const ArrayList = @import("std").ArrayList;
 const MalData = @import("types.zig").MalData;
 const MalErr = @import("error.zig").MalErr;
 const MalLinkedList = @import("types.zig").MalLinkedList;
@@ -109,10 +110,10 @@ pub fn read_form(reader: *Reader) MalErr!?*MalType {
         return read_list(reader);
     }
 
-    return read_symbol(reader);
+    return read_atom(reader);
 }
 
-fn read_list(reader: *Reader) MalErr!?*MalType {
+fn read_list(reader: *Reader) MalErr!*MalType {
     // we know we are in list, skip opening paren
     _ = reader.next();
     var new_list = MalLinkedList.init(Allocator);
@@ -139,7 +140,53 @@ fn read_list(reader: *Reader) MalErr!?*MalType {
     return MalErr.UnmatchedParen;
 }
 
-fn read_symbol(reader: *Reader) MalErr!?*MalType {
+// non-sequential tokens are processed here
+fn read_atom(reader: *Reader) MalErr!*MalType {
     const token = reader.next();
-    return try MalType.new_symbol(Allocator, token);
+
+    if (std.mem.eql(u8, token, "nil")) {
+        return MalType.init(Allocator);
+    } else if (std.mem.eql(u8, token, "true")) {
+        return MalType.new_bool(Allocator, true);
+    } else if (std.mem.eql(u8, token, "false")) {
+        return MalType.new_bool(Allocator, false);
+    } else if (token[0] == '"') {
+        return read_string(token);
+    }
+
+    return MalType.new_symbol(Allocator, token);
+}
+
+fn read_string(token: []const u8) MalErr!*MalType {
+    const token_len = token.len;
+    if (token_len <= 1 or token[token_len - 1] != '"') {
+        return MalErr.UnmatchedString;
+    }
+
+    var result_string = ArrayList(u8).init(Allocator);
+    defer result_string.deinit();
+    // we need to detect escaping during string copy
+    const escape: u8 = '\\';
+    var i: usize = 1;
+
+    while (i < (token_len - 1)) {
+        if (token[i] != escape) {
+            try result_string.append(token[i]);
+            i += 1;
+            continue;
+        }
+
+        if (i == (token_len - 2)) {
+            return MalErr.UnmatchedString;
+        }
+        if (token[i + 1] == 'n') {
+            try result_string.append('\n');
+        } else {
+            try result_string.append(token[i + 1]);
+        }
+        i += 2;
+    }
+
+    const clean_string = result_string.toOwnedSlice() catch return MalErr.OutOfMemory;
+    return MalType.new_string(Allocator, clean_string);
 }

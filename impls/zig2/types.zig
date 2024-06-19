@@ -8,16 +8,20 @@ const MalErr = @import("error.zig").MalErr;
 pub const MalLinkedList = ArrayList(*MalType);
 
 pub const MalTypeValue = enum {
+    Bool,
     Int,
     List,
     Nil,
+    String,
     Symbol,
 };
 
 pub const MalData = union(MalTypeValue) {
+    Bool: bool,
     Int: i64,
     List: MalLinkedList,
     Nil: void,
+    String: []const u8,
     Symbol: []const u8,
 };
 
@@ -26,7 +30,7 @@ pub const MalType = struct {
     meta: ?*MalType,
 
     // nil type
-    fn init(allocator: @TypeOf(Allocator)) MalErr!*MalType {
+    pub fn init(allocator: @TypeOf(Allocator)) MalErr!*MalType {
         const mal_type: *MalType = allocator.create(MalType) catch return MalErr.OutOfMemory;
         errdefer allocator.destroy(mal_type);
         mal_type.data = MalData{ .Nil = undefined };
@@ -34,9 +38,24 @@ pub const MalType = struct {
         return mal_type;
     }
 
+    pub fn new_bool(allocator: @TypeOf(Allocator), value: bool) MalErr!*MalType {
+        const mal_type = try MalType.init(allocator);
+        mal_type.data = MalData{ .Bool = value };
+        return mal_type;
+    }
+
     pub fn new_int(allocator: @TypeOf(Allocator), value: i64) MalErr!*MalType {
         const mal_type = try MalType.init(allocator);
         mal_type.data = MalData{ .Int = value };
+        return mal_type;
+    }
+
+    pub fn new_string(allocator: @TypeOf(Allocator), value: []const u8) MalErr!*MalType {
+        const mal_type = try MalType.init(allocator);
+        errdefer allocator.destroy(mal_type);
+        const value_copy = mem.Allocator.dupe(allocator, u8, value) catch return MalErr.OutOfMemory;
+        errdefer allocator.destroy(value_copy);
+        mal_type.data = MalData{ .String = value_copy };
         return mal_type;
     }
 

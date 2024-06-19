@@ -16,7 +16,7 @@ fn EVAL(input: ?*MalType) ?*MalType {
 }
 
 fn PRINT(input: ?*MalType) ![]const u8 {
-    const output = printer.pr_str(input) catch "Allocation error";
+    const output = printer.pr_str(input, true) catch "Allocation error";
     return output;
 }
 
