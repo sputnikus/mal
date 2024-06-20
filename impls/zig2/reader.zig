@@ -9,6 +9,7 @@ const ArrayList = @import("std").ArrayList;
 const aliases = @import("aliases.zig");
 const MalData = @import("types.zig").MalData;
 const MalErr = @import("error.zig").MalErr;
+const MalHashMap = @import("types.zig").MalHashMap;
 const MalLinkedList = @import("types.zig").MalLinkedList;
 const MalType = @import("types.zig").MalType;
 
@@ -109,8 +110,14 @@ pub fn read_form(reader: *Reader) MalErr!?*MalType {
     const token = reader.peek();
     if (token[0] == '(') {
         return read_list(reader);
+    } else if (token[0] == '[') {
+        return read_vector(reader);
+    } else if (token[0] == '{') {
+        return read_hashmap(reader);
+    } else if (token[0] == ':') {
+        return read_keyword(reader);
     } else if (aliases.is_alias(token[0])) {
-        return read_macro(reader);
+        return read_alias(reader);
     }
 
     return read_atom(reader);
@@ -143,6 +150,74 @@ fn read_list(reader: *Reader) MalErr!*MalType {
     return MalErr.UnmatchedParen;
 }
 
+fn read_vector(reader: *Reader) MalErr!*MalType {
+    // we know we are in vector, skip opening paren
+    _ = reader.next();
+    var new_vector = MalLinkedList.init(Allocator);
+    errdefer new_vector.deinit();
+
+    while (!reader.eol()) {
+        const next_token = reader.peek();
+
+        // ended inside of a list
+        if (next_token.len < 1) {
+            return MalErr.UnmatchedParen;
+        }
+
+        if (next_token[0] == ']') {
+            // skip closing paren
+            _ = reader.next();
+            return MalType.new_vector(Allocator, new_vector);
+        }
+
+        const mal_type = (try read_form(reader)) orelse return MalErr.BadInput;
+        try new_vector.append(mal_type);
+    }
+
+    return MalErr.UnmatchedParen;
+}
+
+fn read_hashmap(reader: *Reader) MalErr!*MalType {
+    // we know we are in hashmap, skip opening paren
+    _ = reader.next();
+    var new_hashmap = MalHashMap.init(Allocator);
+    errdefer new_hashmap.deinit();
+
+    while (!reader.eol()) {
+        const next_token = reader.peek();
+
+        // ended inside of a hashmap
+        if (next_token.len == 0) {
+            return MalErr.UnmatchedParen;
+        }
+        if (next_token[0] == '}') {
+            // skip closing paren
+            _ = reader.next();
+            return MalType.new_hashmap(Allocator, new_hashmap);
+        }
+
+        const mal = (try read_form(reader)) orelse return MalErr.BadInput;
+        const key = switch (mal.data) {
+            .String => |s| s,
+            .Keyword => |kwd| kwd,
+            else => return MalErr.TypeError,
+        };
+        if (next_token.len == 0 or next_token[0] == '}') {
+            // more keys than values
+            return MalErr.BadHashMap;
+        }
+        const val = (try read_form(reader)) orelse return MalErr.BadInput;
+        try new_hashmap.put(key, val);
+    }
+
+    return MalErr.UnmatchedParen;
+}
+
+fn read_keyword(reader: *Reader) MalErr!*MalType {
+    const keyword = reader.next();
+    return MalType.new_keyword(Allocator, keyword[1..keyword.len]);
+}
+
 // non-sequential tokens are processed here
 fn read_atom(reader: *Reader) MalErr!*MalType {
     const token = reader.next();
@@ -157,9 +232,38 @@ fn read_atom(reader: *Reader) MalErr!*MalType {
         return read_string(token);
     }
 
-    return MalType.new_symbol(Allocator, token);
+    return MalType.new_generic(Allocator, token);
 }
 
+fn read_alias(reader: *Reader) MalErr!?*MalType {
+    const token = reader.peek();
+
+    // TODO: rewrite into macro getter + rest of the loop
+    for (aliases.macros) |macro| {
+        const name = macro.name;
+        const value = macro.value;
+        const count = macro.count;
+        if (!std.mem.eql(u8, token, name)) {
+            continue;
+        }
+        var new_list = MalLinkedList.init(Allocator);
+        errdefer new_list.deinit();
+        const new_generic = try MalType.new_generic(Allocator, value);
+        _ = reader.next();
+        var num_read: u8 = 0;
+        while (num_read < count) {
+            const next_read = (try read_form(reader)) orelse return MalErr.BadInput;
+            try new_list.insert(0, next_read);
+            num_read += 1;
+        }
+        try new_list.insert(0, new_generic);
+        return MalType.new_list(Allocator, new_list);
+    }
+
+    return null;
+}
+
+// helper to iterate over string token
 fn read_string(token: []const u8) MalErr!*MalType {
     const token_len = token.len;
     if (token_len <= 1 or token[token_len - 1] != '"') {
@@ -192,31 +296,4 @@ fn read_string(token: []const u8) MalErr!*MalType {
 
     const clean_string = result_string.toOwnedSlice() catch return MalErr.OutOfMemory;
     return MalType.new_string(Allocator, clean_string);
-}
-
-fn read_macro(reader: *Reader) MalErr!?*MalType {
-    const token = reader.peek();
-
-    for (aliases.macros) |macro| {
-        const name = macro.name;
-        const value = macro.value;
-        const count = macro.count;
-        if (!std.mem.eql(u8, token, name)) {
-            continue;
-        }
-        var new_list = MalLinkedList.init(Allocator);
-        errdefer new_list.deinit();
-        const new_generic = try MalType.new_generic(Allocator, value);
-        _ = reader.next();
-        var num_read: u8 = 0;
-        while (num_read < count) {
-            const next_read = (try read_form(reader)) orelse return MalErr.BadInput;
-            try new_list.insert(0, next_read);
-            num_read += 1;
-        }
-        try new_list.insert(0, new_generic);
-        return MalType.new_list(Allocator, new_list);
-    }
-
-    return null;
 }

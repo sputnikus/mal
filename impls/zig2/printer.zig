@@ -18,8 +18,36 @@ pub fn pr_str(mal_tree: ?*MalType, print_readably: bool) MalErr![]const u8 {
         .Generic => |value| {
             try fmt.format(result_string.writer(), "{s}", .{value});
         },
+        .HashMap => |hashmap| {
+            try result_string.append('{');
+            var first_iteration = true;
+            var iterator = hashmap.iterator();
+            while (iterator.next()) |entry| {
+                if (!first_iteration) {
+                    try result_string.append(' ');
+                }
+                const key = entry.key_ptr;
+                // disctint between keyword and string keys
+                if (key.len > 1 and key.*[0] == 255) {
+                    try result_string.append(':');
+                    try fmt.format(result_string.writer(), "{s}", .{key.*[1..]});
+                } else {
+                    const formated = try format_string(key.*, print_readably);
+                    try result_string.appendSlice(formated);
+                }
+                try result_string.append(' ');
+                const item = pr_str(entry.value_ptr.*, print_readably) catch "";
+                result_string.appendSlice(item) catch return MalErr.OutOfMemory;
+                first_iteration = false;
+            }
+            try result_string.append('}');
+        },
         .Int => |value| {
             try fmt.format(result_string.writer(), "{0}", .{value});
+        },
+        .Keyword => |value| {
+            try result_string.append(':');
+            try fmt.format(result_string.writer(), "{s}", .{value[1..value.len]});
         },
         .List => |list| {
             try result_string.append('(');
@@ -44,8 +72,21 @@ pub fn pr_str(mal_tree: ?*MalType, print_readably: bool) MalErr![]const u8 {
             const formated = try format_string(value, print_readably);
             try result_string.appendSlice(formated);
         },
-        .Symbol => |value| {
-            try fmt.format(result_string.writer(), "{s}", .{value});
+        .Vector => |vector| {
+            try result_string.append('[');
+            var first_iteration = true;
+            var i: usize = 0;
+            const vector_len = vector.items.len;
+            while (i < vector_len) {
+                if (!first_iteration) {
+                    try result_string.append(' ');
+                }
+                const item = pr_str(vector.items[i], print_readably) catch "";
+                result_string.appendSlice(item) catch return MalErr.OutOfMemory;
+                first_iteration = false;
+                i += 1;
+            }
+            try result_string.append(']');
         },
     }
 
