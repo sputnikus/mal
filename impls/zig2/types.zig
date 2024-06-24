@@ -11,6 +11,7 @@ pub const MalLinkedList = ArrayList(*MalType);
 
 pub const MalTypeValue = enum {
     Bool,
+    Fun,
     Generic,
     HashMap,
     Int,
@@ -23,6 +24,7 @@ pub const MalTypeValue = enum {
 
 pub const MalData = union(MalTypeValue) {
     Bool: bool,
+    Fun: *const fn (args: []*MalType) MalErr!*MalType,
     Generic: []const u8,
     HashMap: MalHashMap,
     Int: i64,
@@ -98,6 +100,20 @@ pub const MalType = struct {
         return mal_type;
     }
 
+    pub fn to_int(self: *MalType) MalErr!i64 {
+        return switch (self.data) {
+            .Int => |int| int,
+            else => MalErr.TypeError,
+        };
+    }
+
+    pub fn to_linked_list(mal: *MalType) MalErr!*MalLinkedList {
+        return switch (mal.data) {
+            .List => |*l| l,
+            else => MalErr.TypeError,
+        };
+    }
+
     pub fn destroy(self: *MalType, allocator: @TypeOf(Allocator)) void {
         switch (self.data) {
             .Generic => |string| {
@@ -144,3 +160,14 @@ pub const MalType = struct {
         allocator.destroy(self);
     }
 };
+
+// applies first element of list onto the rest
+pub fn apply(args: *MalLinkedList) MalErr!*MalType {
+    var args_clone = try args.clone();
+    defer args_clone.deinit();
+    var apply_slice = try args_clone.toOwnedSlice();
+    const mal_fun = apply_slice[0];
+    const mal_arguments = apply_slice[1..];
+
+    return mal_fun.data.Fun(mal_arguments);
+}

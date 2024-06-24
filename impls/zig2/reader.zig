@@ -228,11 +228,18 @@ fn read_atom(reader: *Reader) MalErr!*MalType {
         return MalType.new_bool(Allocator, true);
     } else if (std.mem.eql(u8, token, "false")) {
         return MalType.new_bool(Allocator, false);
+    } else if (is_integer(token)) {
+        return read_integer(token);
     } else if (token[0] == '"') {
         return read_string(token);
     }
 
     return MalType.new_generic(Allocator, token);
+}
+
+fn is_integer(token: []const u8) bool {
+    _ = std.fmt.parseInt(i64, token, 10) catch return false;
+    return true;
 }
 
 fn read_alias(reader: *Reader) MalErr!?*MalType {
@@ -296,4 +303,10 @@ fn read_string(token: []const u8) MalErr!*MalType {
 
     const clean_string = result_string.toOwnedSlice() catch return MalErr.OutOfMemory;
     return MalType.new_string(Allocator, clean_string);
+}
+
+// helper to parse integer from token
+fn read_integer(token: []const u8) MalErr!*MalType {
+    const integer = std.fmt.parseInt(i64, token, 10) catch return MalErr.BadInput;
+    return MalType.new_int(Allocator, integer);
 }

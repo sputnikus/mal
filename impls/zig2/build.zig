@@ -28,6 +28,12 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        b.addExecutable(.{
+            .name = "step2_eval",
+            .root_source_file = b.path("step2_eval.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     };
 
     for (exes) |exe| {

@@ -15,6 +15,9 @@ pub fn pr_str(mal_tree: ?*MalType, print_readably: bool) MalErr![]const u8 {
         .Bool => |value| {
             try fmt.format(result_string.writer(), "{}", .{value});
         },
+        .Fun => {
+            try result_string.appendSlice("<fun>");
+        },
         .Generic => |value| {
             try fmt.format(result_string.writer(), "{s}", .{value});
         },
