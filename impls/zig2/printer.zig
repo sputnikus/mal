@@ -9,8 +9,6 @@ const MalType = @import("types.zig").MalType;
 
 pub fn pr_str(mal_tree: ?*MalType, print_readably: bool) MalErr![]const u8 {
     var result_string = ArrayList(u8).init(Allocator);
-    defer result_string.deinit();
-
     switch (mal_tree.?.data) {
         .Bool => |value| {
             try fmt.format(result_string.writer(), "{}", .{value});
@@ -54,17 +52,12 @@ pub fn pr_str(mal_tree: ?*MalType, print_readably: bool) MalErr![]const u8 {
         },
         .List => |list| {
             try result_string.append('(');
-            var first_iteration = true;
-            var i: usize = 0;
-            const list_len = list.items.len;
-            while (i < list_len) {
-                if (!first_iteration) {
+            for (list.items, 0..) |elem, i| {
+                if (i != 0) {
                     try result_string.append(' ');
                 }
-                const item = pr_str(list.items[i], print_readably) catch "";
+                const item = pr_str(elem, print_readably) catch "";
                 result_string.appendSlice(item) catch return MalErr.OutOfMemory;
-                first_iteration = false;
-                i += 1;
             }
             try result_string.append(')');
         },
@@ -77,17 +70,12 @@ pub fn pr_str(mal_tree: ?*MalType, print_readably: bool) MalErr![]const u8 {
         },
         .Vector => |vector| {
             try result_string.append('[');
-            var first_iteration = true;
-            var i: usize = 0;
-            const vector_len = vector.items.len;
-            while (i < vector_len) {
-                if (!first_iteration) {
+            for (vector.items, 0..) |elem, i| {
+                if (i != 0) {
                     try result_string.append(' ');
                 }
-                const item = pr_str(vector.items[i], print_readably) catch "";
+                const item = pr_str(elem, print_readably) catch "";
                 result_string.appendSlice(item) catch return MalErr.OutOfMemory;
-                first_iteration = false;
-                i += 1;
             }
             try result_string.append(']');
         },
@@ -99,7 +87,6 @@ pub fn pr_str(mal_tree: ?*MalType, print_readably: bool) MalErr![]const u8 {
 
 fn format_string(value: []const u8, print_readably: bool) MalErr![]const u8 {
     var result_string = ArrayList(u8).init(Allocator);
-    defer result_string.deinit();
 
     if (print_readably) {
         try result_string.appendSlice("\"");

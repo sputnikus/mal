@@ -59,6 +59,7 @@ pub const Reader = struct {
 
 pub fn read_str(string: []const u8) MalErr!?*MalType {
     const tokens = try tokenize(string);
+    defer Allocator.free(tokens);
     var reader = Reader.init(string, tokens);
     return read_form(&reader);
 }
@@ -73,6 +74,7 @@ pub fn tokenize(string: []const u8) MalErr![]usize {
     var indices: []c_int = Allocator.alloc(c_int, buffer_size) catch return MalErr.OutOfMemory;
     defer Allocator.free(indices);
     var match_buffer: []usize = Allocator.alloc(usize, buffer_size) catch return MalErr.OutOfMemory;
+    defer Allocator.free(match_buffer);
     var current_match: usize = 0;
     var start_pos: c_int = 0;
 

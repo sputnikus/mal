@@ -110,8 +110,87 @@ pub const MalType = struct {
     pub fn to_linked_list(mal: *MalType) MalErr!*MalLinkedList {
         return switch (mal.data) {
             .List => |*l| l,
+            .Vector => |*v| v,
             else => MalErr.TypeError,
         };
+    }
+
+    pub fn to_symbol(mal: *MalType) MalErr![]const u8 {
+        return switch (mal.data) {
+            .Generic => |g| g,
+            else => MalErr.TypeError,
+        };
+    }
+
+    pub fn copy(self: *MalType, allocator: @TypeOf(Allocator)) MalErr!*MalType {
+        var mal_copy = try MalType.init(allocator);
+        if (self.meta) |meta| {
+            mal_copy.meta = try meta.copy(allocator);
+        } else {
+            mal_copy.meta = null;
+        }
+
+        switch (self.data) {
+            .Bool => |boolean| {
+                mal_copy.data = MalData{ .Bool = boolean };
+            },
+            .Fun => |function| {
+                mal_copy.data = MalData{ .Fun = function };
+            },
+            .Generic => |generic| {
+                const generic_copy = mem.Allocator.dupe(allocator, u8, generic) catch return MalErr.OutOfMemory;
+                mal_copy.data = MalData{ .Generic = generic_copy };
+            },
+            .HashMap => |*hashmap| {
+                var hashmap_copy = MalHashMap.init(allocator);
+                var iterator = hashmap.iterator();
+                while (iterator.next()) |pair| {
+                    const key = mem.Allocator.dupe(allocator, u8, pair.key_ptr.*) catch return MalErr.OutOfMemory;
+                    const value = try pair.value_ptr.*.copy(allocator);
+                    hashmap_copy.put(key, value) catch return MalErr.OutOfMemory;
+                }
+                mal_copy.data = MalData{ .HashMap = hashmap_copy };
+            },
+            .Int => |integer| {
+                mal_copy.data = MalData{ .Int = integer };
+            },
+            .Keyword => |keyword| {
+                const keyword_copy = mem.Allocator.dupe(allocator, u8, keyword) catch return MalErr.OutOfMemory;
+                mal_copy.data = MalData{ .Keyword = keyword_copy };
+            },
+            .List => |*list| {
+                var list_copy = MalLinkedList.init(Allocator);
+                errdefer list_copy.deinit();
+                for (list.items) |elem| {
+                    const elem_copy = try elem.copy(allocator);
+                    try list_copy.append(elem_copy);
+                }
+                mal_copy.data = MalData{ .List = list_copy };
+            },
+            .String => |string| {
+                const string_copy = mem.Allocator.dupe(allocator, u8, string) catch return MalErr.OutOfMemory;
+                mal_copy.data = MalData{ .String = string_copy };
+            },
+            .Vector => |*vector| {
+                var vector_copy = MalLinkedList.init(Allocator);
+                errdefer vector_copy.deinit();
+                for (vector.items) |elem| {
+                    const elem_copy = try elem.copy(allocator);
+                    try vector_copy.append(elem_copy);
+                }
+                mal_copy.data = MalData{ .Vector = vector_copy };
+            },
+            else => {},
+        }
+
+        return mal_copy;
+    }
+
+    pub fn shallow_destroy(self: *MalType, allocator: @TypeOf(Allocator)) void {
+        if (self.meta) |meta| {
+            meta.destroy(allocator);
+        }
+        allocator.destroy(self);
     }
 
     pub fn destroy(self: *MalType, allocator: @TypeOf(Allocator)) void {
@@ -131,14 +210,14 @@ pub const MalType = struct {
             .Keyword => |string| {
                 allocator.free(string);
             },
-            .List => |*linked_list| {
-                const ll_slice = linked_list.items;
+            .List => |*list| {
+                const ll_slice = list.items;
                 var i: usize = 0;
                 while (i < ll_slice.len) {
                     ll_slice[i].destroy(allocator);
                     i += 1;
                 }
-                linked_list.deinit();
+                list.deinit();
             },
             .String => |string| {
                 allocator.free(string);
@@ -154,10 +233,7 @@ pub const MalType = struct {
             },
             else => {},
         }
-        if (self.meta) |mal_meta| {
-            mal_meta.destroy(allocator);
-        }
-        allocator.destroy(self);
+        self.shallow_destroy(allocator);
     }
 };
 
