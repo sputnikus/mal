@@ -1,16 +1,26 @@
 const std = @import("std");
 const mem = @import("std").mem;
-
 const Allocator = @import("std").heap.c_allocator;
 const ArrayList = @import("std").ArrayList;
 const HashMap = @import("std").StringHashMap;
+
+const Env = @import("env.zig").Env;
 const MalErr = @import("error.zig").MalErr;
 
 pub const MalHashMap = HashMap(*MalType);
 pub const MalLinkedList = ArrayList(*MalType);
+pub const MalFun = *const fn (args: []*MalType) MalErr!*MalType;
+// replacement for user defined function closures
+pub const MalDefFun = struct {
+    args: *MalType,
+    body: *MalType,
+    env: *Env,
+    eval_fn: ?(*const fn (ast: *MalType, env: *Env) MalErr!*MalType),
+};
 
 pub const MalTypeValue = enum {
     Bool,
+    DefFun,
     Fun,
     Generic,
     HashMap,
@@ -24,7 +34,8 @@ pub const MalTypeValue = enum {
 
 pub const MalData = union(MalTypeValue) {
     Bool: bool,
-    Fun: *const fn (args: []*MalType) MalErr!*MalType,
+    DefFun: MalDefFun,
+    Fun: MalFun,
     Generic: []const u8,
     HashMap: MalHashMap,
     Int: i64,
@@ -51,6 +62,16 @@ pub const MalType = struct {
     pub fn new_bool(allocator: @TypeOf(Allocator), value: bool) MalErr!*MalType {
         const mal_type = try MalType.init(allocator);
         mal_type.data = MalData{ .Bool = value };
+        return mal_type;
+    }
+
+    // create new user defined function
+    pub fn new_function(allocator: @TypeOf(Allocator), ast: *MalType, env: *Env, eval_fn: ?(*const fn (ast: *MalType, env: *Env) MalErr!*MalType)) MalErr!*MalType {
+        const mal_type = try MalType.init(allocator);
+        const ast_list = try ast.to_linked_list();
+        const args = ast_list.items[1].copy(allocator) catch return MalErr.OutOfMemory;
+        const body = ast_list.items[2].copy(allocator) catch return MalErr.OutOfMemory;
+        mal_type.data = MalData{ .DefFun = MalDefFun{ .args = args, .body = body, .env = env, .eval_fn = eval_fn } };
         return mal_type;
     }
 
@@ -107,19 +128,47 @@ pub const MalType = struct {
         };
     }
 
-    pub fn to_linked_list(mal: *MalType) MalErr!*MalLinkedList {
-        return switch (mal.data) {
+    pub fn to_linked_list(self: *MalType) MalErr!*MalLinkedList {
+        return switch (self.data) {
             .List => |*l| l,
             .Vector => |*v| v,
             else => MalErr.TypeError,
         };
     }
 
-    pub fn to_symbol(mal: *MalType) MalErr![]const u8 {
-        return switch (mal.data) {
+    pub fn to_symbol(self: *MalType) MalErr![]const u8 {
+        return switch (self.data) {
             .Generic => |g| g,
             else => MalErr.TypeError,
         };
+    }
+
+    // If type is list, return list without list head
+    pub fn rest(self: *MalType) MalErr!*MalType {
+        var list = switch (self.data) {
+            .List => |*l| l,
+            else => return MalErr.TypeError,
+        };
+        if (list.items.len == 0) {
+            return MalErr.OutOfBounds;
+        } else {
+            const first = list.orderedRemove(0);
+            first.destroy(Allocator);
+        }
+
+        return self;
+    }
+
+    // If type is list, pop last element
+    pub fn last(self: *MalType) MalErr!*MalType {
+        var list = switch (self.data) {
+            .List => |*l| l,
+            else => return MalErr.TypeError,
+        };
+        if (list.items.len == 0) {
+            return MalErr.OutOfBounds;
+        }
+        return list.pop();
     }
 
     pub fn copy(self: *MalType, allocator: @TypeOf(Allocator)) MalErr!*MalType {
@@ -133,6 +182,17 @@ pub const MalType = struct {
         switch (self.data) {
             .Bool => |boolean| {
                 mal_copy.data = MalData{ .Bool = boolean };
+            },
+            .DefFun => |def_fun| {
+                const args = try def_fun.args.copy(allocator);
+                const body = try def_fun.body.copy(allocator);
+                const def_fun_copy = MalDefFun{
+                    .args = args,
+                    .body = body,
+                    .env = try def_fun.env.copy(allocator),
+                    .eval_fn = def_fun.eval_fn,
+                };
+                mal_copy.data = MalData{ .DefFun = def_fun_copy };
             },
             .Fun => |function| {
                 mal_copy.data = MalData{ .Fun = function };
@@ -180,7 +240,10 @@ pub const MalType = struct {
                 }
                 mal_copy.data = MalData{ .Vector = vector_copy };
             },
-            else => {},
+            else => {
+                // to prevent accidental Nil copy
+                mal_copy.data = self.data;
+            },
         }
 
         return mal_copy;
@@ -245,5 +308,24 @@ pub fn apply(args: *MalLinkedList) MalErr!*MalType {
     const mal_fun = apply_slice[0];
     const mal_arguments = apply_slice[1..];
 
-    return mal_fun.data.Fun(mal_arguments);
+    switch (mal_fun.data) {
+        .DefFun => |def_fun| {
+            const arg_vars = try def_fun.args.to_linked_list();
+            const env = def_fun.env;
+            // can't eval without eval function
+            const eval_fn = def_fun.eval_fn orelse return MalErr.TypeError;
+            const scope_args = arg_vars.toOwnedSlice() catch return MalErr.OutOfMemory;
+            const scope_env = try Env.init(Allocator, env, scope_args, mal_arguments);
+
+            const new_body = try def_fun.body.copy(Allocator);
+            mal_fun.destroy(Allocator);
+            return eval_fn(new_body, scope_env);
+        },
+        .Fun => |core_fun| {
+            return core_fun(mal_arguments);
+        },
+        else => {
+            return MalErr.InvalidArgs;
+        },
+    }
 }

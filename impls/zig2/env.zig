@@ -1,8 +1,12 @@
+const std = @import("std");
 const mem = @import("std").mem;
+
+const pr_str = @import("printer.zig").pr_str;
 
 const Allocator = @import("std").heap.c_allocator;
 const MalErr = @import("error.zig").MalErr;
 const MalHashMap = @import("types.zig").MalHashMap;
+const MalLinkedList = @import("types.zig").MalLinkedList;
 const MalType = @import("types.zig").MalType;
 
 pub const Env = struct {
@@ -10,7 +14,7 @@ pub const Env = struct {
     data: *MalHashMap,
     ref_counter: *i64,
 
-    pub fn init(allocator: @TypeOf(Allocator), opt_outer: ?*Env) MalErr!*Env {
+    pub fn init(allocator: @TypeOf(Allocator), opt_outer: ?*Env, opt_binds: ?[]*MalType, opt_exprs: ?[]*MalType) MalErr!*Env {
         const new_env: *Env = allocator.create(Env) catch return MalErr.OutOfMemory;
         new_env.ref_counter = allocator.create(i64) catch return MalErr.OutOfMemory;
         new_env.ref_counter.* = 1;
@@ -22,6 +26,25 @@ pub const Env = struct {
         }
         new_env.data = allocator.create(MalHashMap) catch return MalErr.OutOfMemory;
         new_env.data.* = MalHashMap.init(allocator);
+
+        if (opt_binds != null and opt_exprs != null) {
+            var i: usize = 0;
+            while (i < opt_binds.?.len) {
+                const bind = try opt_binds.?[i].to_symbol();
+                if (!mem.eql(u8, bind, "&")) {
+                    try new_env.set(bind, opt_exprs.?[i]);
+                    i += 1;
+                    continue;
+                }
+                if (i + 1 >= opt_binds.?.len) return MalErr.OutOfBounds;
+                const variadic_arg = try opt_binds.?[i + 1].to_symbol();
+                var expr_list = MalLinkedList.init(allocator);
+                expr_list.appendSlice(opt_exprs.?[i..]) catch return MalErr.OutOfMemory;
+                const variadic_list = try MalType.new_list(allocator, expr_list);
+                try new_env.set(variadic_arg, variadic_list);
+                break;
+            }
+        }
         return new_env;
     }
 

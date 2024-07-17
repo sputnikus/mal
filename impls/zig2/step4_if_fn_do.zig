@@ -8,14 +8,14 @@ const MalHashMap = @import("types.zig").MalHashMap;
 const MalLinkedList = @import("types.zig").MalLinkedList;
 const MalType = @import("types.zig").MalType;
 const apply = @import("types.zig").apply;
-const builtins = @import("core.zig");
+const core = @import("core.zig");
 const printer = @import("printer.zig");
 const reader = @import("reader.zig");
 const getline = @import("readline.zig").getline;
 
 var global_repl_env: *Env = undefined;
 
-fn READ(input: []u8) MalErr!?*MalType {
+fn READ(input: []const u8) MalErr!?*MalType {
     return try reader.read_str(input);
 }
 
@@ -113,6 +113,32 @@ fn EVAL(ast: *MalType, repl_env: *Env) MalErr!*MalType {
                 ast.destroy(Allocator);
                 // Eval let scope
                 return EVAL(scope_ast, let_env);
+            } else if (std.mem.eql(u8, symbol, "do")) {
+                const rest = try ast.rest();
+                var do_result = try eval_ast(rest, repl_env);
+                defer do_result.destroy(Allocator);
+                return do_result.last();
+            } else if (std.mem.eql(u8, symbol, "if")) {
+                defer ast.destroy(Allocator);
+                const condition = try list.items[1].copy(Allocator);
+                const evaled_cond = try EVAL(condition, repl_env);
+                const branch = switch (evaled_cond.data) {
+                    .Bool => |boolean| boolean,
+                    .Nil => false,
+                    else => true,
+                };
+                if (branch) {
+                    const true_ast = try list.items[2].copy(Allocator);
+                    return EVAL(true_ast, repl_env);
+                } else if (list.items.len >= 4) {
+                    const false_ast = try list.items[3].copy(Allocator);
+                    return EVAL(false_ast, repl_env);
+                }
+                return MalType.init(Allocator);
+            } else if (std.mem.eql(u8, symbol, "fn*")) {
+                defer ast.destroy(Allocator);
+                const mal_fun = try MalType.new_function(Allocator, ast, repl_env, &EVAL);
+                return mal_fun;
             } else {
                 const evaluated = try eval_ast(ast, repl_env);
                 return apply(try evaluated.to_linked_list());
@@ -129,7 +155,7 @@ fn PRINT(input: *MalType) MalErr![]const u8 {
     return printer.pr_str(input, true);
 }
 
-fn rep(input: []u8) MalErr![]const u8 {
+fn rep(input: []const u8) MalErr![]const u8 {
     const opt_read_output = try READ(input);
     if (opt_read_output) |read_output| {
         const eval_output = try EVAL(read_output, global_repl_env);
@@ -144,18 +170,15 @@ fn init_env() MalErr!*Env {
     global_repl_env = Env.init(Allocator, null, null, null) catch return MalErr.OutOfMemory;
     var builtin_env = global_repl_env;
 
-    const mapping = [_]struct { []const u8, *const fn (args: []*MalType) MalErr!*MalType }{
-        .{ "+", &builtins.add_int },
-        .{ "-", &builtins.sub_int },
-        .{ "*", &builtins.mul_int },
-        .{ "/", &builtins.div_int },
-    };
-
-    for (mapping) |fun_pair| {
+    for (core.ns) |fun_pair| {
         const fun_mal = try MalType.init(Allocator);
-        fun_mal.data = MalData{ .Fun = fun_pair[1] };
-        builtin_env.set(fun_pair[0], fun_mal) catch return MalErr.OutOfMemory;
+        fun_mal.data = MalData{ .Fun = fun_pair.func };
+        builtin_env.set(fun_pair.name, fun_mal) catch return MalErr.OutOfMemory;
     }
+
+    const def_not_string = "(def! not (fn* (a) (if a false true)))";
+    const output = try rep(def_not_string);
+    Allocator.free(output);
 
     return builtin_env;
 }
