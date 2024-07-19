@@ -171,6 +171,18 @@ pub const MalType = struct {
         return list.pop();
     }
 
+    // If type is list, get list head
+    pub fn head(self: *MalType) MalErr!*MalType {
+        const list = switch (self.data) {
+            .List => |*l| l,
+            else => return MalErr.TypeError,
+        };
+        if (list.items.len == 0) {
+            return MalErr.OutOfBounds;
+        }
+        return list.items[0].copy(Allocator);
+    }
+
     pub fn copy(self: *MalType, allocator: @TypeOf(Allocator)) MalErr!*MalType {
         var mal_copy = try MalType.init(allocator);
         if (self.meta) |meta| {

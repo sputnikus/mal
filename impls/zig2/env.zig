@@ -108,4 +108,17 @@ pub const Env = struct {
         env_copy.data = self.data;
         return env_copy;
     }
+
+    pub fn debug_print(self: *Env) void {
+        if (self.outer) |outer| {
+            std.debug.print("Outer ", .{});
+            outer.*.debug_print();
+        }
+        std.debug.print("Env\n", .{});
+        var iterator = self.data.iterator();
+        while (iterator.next()) |elem| {
+            const value = pr_str(elem.value_ptr.*, true) catch "#<error>";
+            std.debug.print("\t{s}:\t{s}\n", .{ elem.key_ptr.*, value });
+        }
+    }
 };
