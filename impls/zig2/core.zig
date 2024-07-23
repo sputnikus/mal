@@ -8,7 +8,9 @@ const MalFun = @import("types.zig").MalFun;
 const MalLinkedList = @import("types.zig").MalLinkedList;
 const MalType = @import("types.zig").MalType;
 const MalTypeValue = @import("types.zig").MalTypeValue;
+const apply = @import("types.zig").apply;
 const printer = @import("printer.zig");
+const read_str = @import("reader.zig").read_str;
 
 pub fn add_int(args: []*MalType) MalErr!*MalType {
     const x = try args[0].to_int();
@@ -203,6 +205,82 @@ fn println(args: []*MalType) MalErr!*MalType {
     return MalType.init(Allocator);
 }
 
+fn readString(args: []*MalType) MalErr!*MalType {
+    const string_input = try args[0].to_string();
+    return (try read_str(string_input)) orelse return MalType.init(Allocator);
+}
+
+fn slurp(args: []*MalType) MalErr!*MalType {
+    switch (args[0].data) {
+        .String => |path| {
+            var file = std.fs.cwd().openFile(path, .{}) catch return MalErr.IOError;
+            defer file.close();
+
+            const stat = file.stat() catch return MalErr.IOError;
+            const buffer = file.readToEndAlloc(Allocator, stat.size) catch return MalErr.IOError;
+            defer Allocator.free(buffer);
+
+            return MalType.new_string(Allocator, buffer);
+        },
+        else => return MalErr.TypeError,
+    }
+}
+
+fn atom(args: []*MalType) MalErr!*MalType {
+    return MalType.new_atom(Allocator, args[0]);
+}
+
+fn isAtom(args: []*MalType) MalErr!*MalType {
+    return MalType.new_bool(Allocator, args[0].data == MalTypeValue.Atom);
+}
+
+fn deref(args: []*MalType) MalErr!*MalType {
+    return switch (args[0].data) {
+        .Atom => |atom_val| atom_val.*.copy(Allocator),
+        else => MalErr.TypeError,
+    };
+}
+
+fn atomReset(args: []*MalType) MalErr!*MalType {
+    switch (args[0].data) {
+        .Atom => |*old_value| {
+            var new_value = try args[1].copy(Allocator);
+            old_value.*.*.destroy(Allocator);
+            old_value.*.* = new_value;
+            return new_value.copy(Allocator);
+        },
+        else => return MalErr.TypeError,
+    }
+}
+
+fn atomSwap(args: []*MalType) MalErr!*MalType {
+    const args_len = args.len;
+    if (args_len < 2) return MalErr.InvalidArgs;
+    var new_args = MalLinkedList.init(Allocator);
+    defer {
+        const ll_slice = new_args.items;
+        // first element gets freed by apply()
+        // think about fixing this to make freeing more consistent
+        for (ll_slice[1..]) |item| {
+            item.destroy(Allocator);
+        }
+        new_args.deinit();
+    }
+    // args 1 is swap function
+    try new_args.append(try args[1].copy(Allocator));
+    // deref operates on args 0
+    try new_args.append(try deref(args));
+    var i: usize = 2;
+    while (i < args_len) {
+        try new_args.append(try args[i].copy(Allocator));
+        i += 1;
+    }
+    const result = try apply(&new_args);
+    var reset_args = [_]*MalType{ args[0], result };
+    const new_atom_value = atomReset(&reset_args);
+    return new_atom_value;
+}
+
 pub const NamespaceMapping = struct {
     name: []const u8,
     func: MalFun,
@@ -230,4 +308,13 @@ pub const ns = [_]NamespaceMapping{
     NamespaceMapping{ .name = "str", .func = &str },
     NamespaceMapping{ .name = "prn", .func = &prn },
     NamespaceMapping{ .name = "println", .func = &println },
+
+    // step6 core functions
+    NamespaceMapping{ .name = "read-string", .func = &readString },
+    NamespaceMapping{ .name = "slurp", .func = &slurp },
+    NamespaceMapping{ .name = "atom", .func = &atom },
+    NamespaceMapping{ .name = "atom?", .func = &isAtom },
+    NamespaceMapping{ .name = "deref", .func = &deref },
+    NamespaceMapping{ .name = "reset!", .func = &atomReset },
+    NamespaceMapping{ .name = "swap!", .func = &atomSwap },
 };

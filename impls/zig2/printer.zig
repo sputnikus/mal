@@ -10,6 +10,10 @@ const MalType = @import("types.zig").MalType;
 pub fn pr_str(mal_tree: ?*MalType, print_readably: bool) MalErr![]const u8 {
     var result_string = ArrayList(u8).init(Allocator);
     switch (mal_tree.?.data) {
+        .Atom => |value| {
+            const printed_value = try pr_str(value.*, print_readably);
+            try fmt.format(result_string.writer(), "(atom {s})", .{printed_value});
+        },
         .Bool => |value| {
             try fmt.format(result_string.writer(), "{}", .{value});
         },

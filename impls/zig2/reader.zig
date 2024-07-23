@@ -43,9 +43,13 @@ pub const Reader = struct {
 
     // Returns the token at the current position
     pub fn peek(self: *Reader) []const u8 {
-        if (!self.eol()) {
+        while (!self.eol()) {
             const start_slice = self.tokens[self.position];
             const end_slice = self.tokens[self.position + 1];
+            if (self.string[start_slice] == ';') {
+                self.position += 2;
+                continue;
+            }
             return self.string[start_slice..end_slice];
         }
         return "";
@@ -106,10 +110,10 @@ pub fn tokenize(string: []const u8) MalErr![]usize {
 }
 
 pub fn read_form(reader: *Reader) MalErr!?*MalType {
-    if (reader.eol()) {
-        return null;
-    }
+    if (reader.eol()) return null;
     const token = reader.peek();
+    if (token.len == 0) return null;
+
     if (token[0] == '(') {
         return read_list(reader);
     } else if (token[0] == '[') {

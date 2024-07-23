@@ -19,6 +19,7 @@ pub const MalDefFun = struct {
 };
 
 pub const MalTypeValue = enum {
+    Atom,
     Bool,
     DefFun,
     Fun,
@@ -33,6 +34,7 @@ pub const MalTypeValue = enum {
 };
 
 pub const MalData = union(MalTypeValue) {
+    Atom: **MalType,
     Bool: bool,
     DefFun: MalDefFun,
     Fun: MalFun,
@@ -49,13 +51,25 @@ pub const MalData = union(MalTypeValue) {
 pub const MalType = struct {
     data: MalData,
     meta: ?*MalType,
+    ref_counter: *i64,
 
     // nil type
     pub fn init(allocator: @TypeOf(Allocator)) MalErr!*MalType {
         const mal_type: *MalType = allocator.create(MalType) catch return MalErr.OutOfMemory;
         errdefer allocator.destroy(mal_type);
+        mal_type.ref_counter = allocator.create(i64) catch return MalErr.OutOfMemory;
+        mal_type.ref_counter.* = 1;
         mal_type.data = MalData{ .Nil = undefined };
         mal_type.meta = null;
+        return mal_type;
+    }
+
+    pub fn new_atom(allocator: @TypeOf(Allocator), value: *MalType) MalErr!*MalType {
+        const mal_type = try MalType.init(allocator);
+        errdefer mal_type.destroy(allocator);
+        const atom_ptr = allocator.create(*MalType) catch return MalErr.OutOfMemory;
+        atom_ptr.* = try value.copy(allocator);
+        mal_type.data = MalData{ .Atom = atom_ptr };
         return mal_type;
     }
 
@@ -136,6 +150,13 @@ pub const MalType = struct {
         };
     }
 
+    pub fn to_string(self: *MalType) MalErr![]const u8 {
+        return switch (self.data) {
+            .String => |s| s,
+            else => MalErr.TypeError,
+        };
+    }
+
     pub fn to_symbol(self: *MalType) MalErr![]const u8 {
         return switch (self.data) {
             .Generic => |g| g,
@@ -185,6 +206,10 @@ pub const MalType = struct {
 
     pub fn copy(self: *MalType, allocator: @TypeOf(Allocator)) MalErr!*MalType {
         var mal_copy = try MalType.init(allocator);
+
+        mal_copy.ref_counter = self.ref_counter;
+        self.ref_counter.* += 1;
+
         if (self.meta) |meta| {
             mal_copy.meta = try meta.copy(allocator);
         } else {
@@ -192,6 +217,9 @@ pub const MalType = struct {
         }
 
         switch (self.data) {
+            .Atom => |atom| {
+                mal_copy.data = MalData{ .Atom = atom };
+            },
             .Bool => |boolean| {
                 mal_copy.data = MalData{ .Bool = boolean };
             },
@@ -262,14 +290,22 @@ pub const MalType = struct {
     }
 
     pub fn shallow_destroy(self: *MalType, allocator: @TypeOf(Allocator)) void {
+        self.ref_counter.* -= 1;
         if (self.meta) |meta| {
             meta.destroy(allocator);
+        }
+        if (self.ref_counter.* <= 0) {
+            allocator.destroy(self.ref_counter);
         }
         allocator.destroy(self);
     }
 
     pub fn destroy(self: *MalType, allocator: @TypeOf(Allocator)) void {
+        const ref_count = self.ref_counter.*;
         switch (self.data) {
+            .Atom => |atom| {
+                if (ref_count <= 1) atom.*.destroy(allocator);
+            },
             .Generic => |string| {
                 allocator.free(string);
             },
@@ -314,8 +350,7 @@ pub const MalType = struct {
 
 // applies first element of list onto the rest
 pub fn apply(args: *MalLinkedList) MalErr!*MalType {
-    var args_clone = try args.clone();
-    defer args_clone.deinit();
+    var args_clone = args.clone() catch return MalErr.OutOfMemory;
     var apply_slice = try args_clone.toOwnedSlice();
     const mal_fun = apply_slice[0];
     const mal_arguments = apply_slice[1..];
