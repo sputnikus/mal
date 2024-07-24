@@ -58,6 +58,12 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        b.addExecutable(.{
+            .name = "step7_quote",
+            .root_source_file = b.path("step7_quote.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     };
 
     for (exes) |exe| {

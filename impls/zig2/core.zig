@@ -281,6 +281,49 @@ fn atomSwap(args: []*MalType) MalErr!*MalType {
     return new_atom_value;
 }
 
+fn cons(args: []*MalType) MalErr!*MalType {
+    const args_len = args.len;
+    if (args_len < 2) return MalErr.InvalidArgs;
+    switch (args[1].data) {
+        .List, .Vector => |*linked_list| {
+            var acc = MalLinkedList.init(Allocator);
+            acc.append(try args[0].copy(Allocator)) catch return MalErr.OutOfMemory;
+            const slice = linked_list.toOwnedSlice() catch return MalErr.OutOfMemory;
+            acc.appendSlice(slice) catch return MalErr.OutOfMemory;
+            return MalType.new_list(Allocator, acc);
+        },
+        else => return MalErr.TypeError,
+    }
+}
+
+fn concat(args: []*MalType) MalErr!*MalType {
+    var acc = MalLinkedList.init(Allocator);
+    for (args) |arg| {
+        switch (arg.data) {
+            .List, .Vector => |*linked_list| {
+                const slice = linked_list.toOwnedSlice() catch return MalErr.OutOfMemory;
+                acc.appendSlice(slice) catch return MalErr.OutOfMemory;
+            },
+            else => return MalErr.TypeError,
+        }
+    }
+    return MalType.new_list(Allocator, acc);
+}
+
+fn vec(args: []*MalType) MalErr!*MalType {
+    const args_len = args.len;
+    if (args_len < 1) return MalErr.InvalidArgs;
+    switch (args[0].data) {
+        .List => |linked_list| {
+            return MalType.new_vector(Allocator, linked_list);
+        },
+        .Vector => {
+            return args[0];
+        },
+        else => return MalErr.TypeError,
+    }
+}
+
 pub const NamespaceMapping = struct {
     name: []const u8,
     func: MalFun,
@@ -309,7 +352,7 @@ pub const ns = [_]NamespaceMapping{
     NamespaceMapping{ .name = "prn", .func = &prn },
     NamespaceMapping{ .name = "println", .func = &println },
 
-    // step6 core functions
+    // step 6 core functions
     NamespaceMapping{ .name = "read-string", .func = &readString },
     NamespaceMapping{ .name = "slurp", .func = &slurp },
     NamespaceMapping{ .name = "atom", .func = &atom },
@@ -317,4 +360,9 @@ pub const ns = [_]NamespaceMapping{
     NamespaceMapping{ .name = "deref", .func = &deref },
     NamespaceMapping{ .name = "reset!", .func = &atomReset },
     NamespaceMapping{ .name = "swap!", .func = &atomSwap },
+
+    // step 7 core functions
+    NamespaceMapping{ .name = "cons", .func = &cons },
+    NamespaceMapping{ .name = "concat", .func = &concat },
+    NamespaceMapping{ .name = "vec", .func = &vec },
 };

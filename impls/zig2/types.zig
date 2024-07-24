@@ -183,7 +183,7 @@ pub const MalType = struct {
     // If type is list, pop last element
     pub fn last(self: *MalType) MalErr!*MalType {
         var list = switch (self.data) {
-            .List => |*l| l,
+            .List, .Vector => |*l| l,
             else => return MalErr.TypeError,
         };
         if (list.items.len == 0) {
@@ -192,16 +192,33 @@ pub const MalType = struct {
         return list.pop();
     }
 
-    // If type is list, get list head
-    pub fn head(self: *MalType) MalErr!*MalType {
+    // Python style pop for List & Vector types
+    pub fn seq_pop(self: *MalType, index: usize) MalErr!*MalType {
         const list = switch (self.data) {
-            .List => |*l| l,
+            .List, .Vector => |*l| l,
             else => return MalErr.TypeError,
         };
-        if (list.items.len == 0) {
+        if (list.items.len == 0 or index > list.items.len) {
             return MalErr.OutOfBounds;
         }
-        return list.items[0].copy(Allocator);
+        return list.orderedRemove(index);
+    }
+
+    // Python style len for List & Vector types
+    pub fn seq_len(self: *MalType) MalErr!usize {
+        const list = switch (self.data) {
+            .List, .Vector => |*l| l,
+            else => return MalErr.TypeError,
+        };
+        return list.items.len;
+    }
+
+    pub fn starts_with(self: *MalType, com: []const u8) !bool {
+        const list = self.to_linked_list() catch return false;
+        if (list.items.len < 2) return false;
+
+        const start_symbol = list.items[0].to_symbol() catch return false;
+        return std.mem.eql(u8, start_symbol, com);
     }
 
     pub fn copy(self: *MalType, allocator: @TypeOf(Allocator)) MalErr!*MalType {
