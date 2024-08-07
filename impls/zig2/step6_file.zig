@@ -141,7 +141,7 @@ fn EVAL(ast: *MalType, repl_env: *Env) MalErr!*MalType {
                     continue;
                 } else if (std.mem.eql(u8, symbol, "fn*")) {
                     defer tco_ast.destroy(Allocator);
-                    const mal_fun = try MalType.new_function(Allocator, tco_ast, tco_env, &EVAL);
+                    const mal_fun = try MalType.new_function(Allocator, tco_ast, tco_env, &EVAL, false);
                     return mal_fun;
                 } else {
                     const evaluated = try eval_ast(tco_ast, tco_env);

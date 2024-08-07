@@ -16,6 +16,7 @@ pub const MalDefFun = struct {
     body: *MalType,
     env: *Env,
     eval_fn: ?(*const fn (ast: *MalType, env: *Env) MalErr!*MalType),
+    is_macro: bool,
 };
 
 pub const MalTypeValue = enum {
@@ -80,12 +81,12 @@ pub const MalType = struct {
     }
 
     // create new user defined function
-    pub fn new_function(allocator: @TypeOf(Allocator), ast: *MalType, env: *Env, eval_fn: ?(*const fn (ast: *MalType, env: *Env) MalErr!*MalType)) MalErr!*MalType {
+    pub fn new_function(allocator: @TypeOf(Allocator), ast: *MalType, env: *Env, eval_fn: ?(*const fn (ast: *MalType, env: *Env) MalErr!*MalType), is_macro: bool) MalErr!*MalType {
         const mal_type = try MalType.init(allocator);
         const ast_list = try ast.to_linked_list();
         const args = ast_list.items[1].copy(allocator) catch return MalErr.OutOfMemory;
         const body = ast_list.items[2].copy(allocator) catch return MalErr.OutOfMemory;
-        mal_type.data = MalData{ .DefFun = MalDefFun{ .args = args, .body = body, .env = env, .eval_fn = eval_fn } };
+        mal_type.data = MalData{ .DefFun = MalDefFun{ .args = args, .body = body, .env = env, .eval_fn = eval_fn, .is_macro = is_macro } };
         return mal_type;
     }
 
@@ -164,10 +165,10 @@ pub const MalType = struct {
         };
     }
 
-    // If type is list, return list without list head
+    // If type is sequence, return List without head
     pub fn rest(self: *MalType) MalErr!*MalType {
         var list = switch (self.data) {
-            .List => |*l| l,
+            .List, .Vector => |*l| l,
             else => return MalErr.TypeError,
         };
         if (list.items.len == 0) {
@@ -177,10 +178,14 @@ pub const MalType = struct {
             first.destroy(Allocator);
         }
 
-        return self;
+        return switch (self.data) {
+            .List => self,
+            .Vector => MalType.new_list(Allocator, list.*),
+            else => return MalErr.TypeError,
+        };
     }
 
-    // If type is list, pop last element
+    // If type is sequence, pop last element
     pub fn last(self: *MalType) MalErr!*MalType {
         var list = switch (self.data) {
             .List, .Vector => |*l| l,
@@ -198,7 +203,7 @@ pub const MalType = struct {
             .List, .Vector => |*l| l,
             else => return MalErr.TypeError,
         };
-        if (list.items.len == 0 or index > list.items.len) {
+        if (list.items.len == 0 or index >= list.items.len) {
             return MalErr.OutOfBounds;
         }
         return list.orderedRemove(index);
@@ -211,6 +216,22 @@ pub const MalType = struct {
             else => return MalErr.TypeError,
         };
         return list.items.len;
+    }
+
+    // same as rest, returns underlying list
+    pub fn seq_rest(self: *MalType) MalErr!*MalLinkedList {
+        var list = switch (self.data) {
+            .List, .Vector => |*l| l,
+            else => return MalErr.TypeError,
+        };
+        if (list.items.len == 0) {
+            return MalErr.OutOfBounds;
+        } else {
+            const first = list.orderedRemove(0);
+            first.destroy(Allocator);
+        }
+
+        return list;
     }
 
     pub fn starts_with(self: *MalType, com: []const u8) !bool {
@@ -248,6 +269,7 @@ pub const MalType = struct {
                     .body = body,
                     .env = try def_fun.env.copy(allocator),
                     .eval_fn = def_fun.eval_fn,
+                    .is_macro = def_fun.is_macro,
                 };
                 mal_copy.data = MalData{ .DefFun = def_fun_copy };
             },

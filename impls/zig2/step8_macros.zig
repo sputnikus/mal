@@ -23,7 +23,6 @@ fn READ(input: []const u8) MalErr!?*MalType {
 fn quasiquote(ast: *MalType) MalErr!*MalType {
     switch (ast.data) {
         .List => |*list| {
-            std.debug.print("{0}\n", .{(try ast.seq_len())});
             if ((try ast.seq_len()) == 0) return ast;
             defer ast.destroy(Allocator);
             const symbol = list.items[0].to_symbol() catch "";
@@ -82,6 +81,51 @@ fn quasiquote(ast: *MalType) MalErr!*MalType {
         },
         else => return ast,
     }
+}
+
+fn is_macro_call(ast: *MalType, repl_env: *Env) bool {
+    const linked_list = switch (ast.data) {
+        .List => |*list| list,
+        else => return false,
+    };
+
+    if (linked_list.items.len < 1) return false;
+    const symbol = switch (linked_list.items[0].data) {
+        .Generic => |gen| gen,
+        else => return false,
+    };
+    const env_val = repl_env.get(symbol) catch {
+        return false;
+    };
+    return switch (env_val.data) {
+        .DefFun => |def_fun| def_fun.is_macro,
+        else => false,
+    };
+}
+
+fn macroexpand(ast: *MalType, repl_env: *Env) MalErr!*MalType {
+    var expanded_ast = ast;
+    var is_macro = is_macro_call(expanded_ast, repl_env);
+    var macro = ast;
+    while (is_macro) {
+        var ast_list = try expanded_ast.to_linked_list();
+        if (ast_list.items.len > 0) {
+            const first = ast_list.orderedRemove(0);
+            const symbol = switch (first.data) {
+                .Generic => |gen| gen,
+                else => return MalErr.TypeError,
+            };
+            const macro_expansion = try repl_env.get(symbol);
+            macro = try macro_expansion.copy(Allocator);
+        }
+        ast_list.insert(0, macro) catch return MalErr.OutOfMemory;
+        const new_mal = try apply(ast_list);
+        ast_list.deinit();
+        expanded_ast.shallow_destroy(Allocator);
+        expanded_ast = new_mal;
+        is_macro = is_macro_call(expanded_ast, repl_env);
+    }
+    return expanded_ast;
 }
 
 fn eval_ast(ast: *MalType, repl_env: *Env) MalErr!*MalType {
@@ -147,16 +191,23 @@ fn EVAL(ast: *MalType, repl_env: *Env) MalErr!*MalType {
     var tco_ast = ast;
     var tco_env = repl_env;
     while (true) {
+        tco_ast = try macroexpand(tco_ast, tco_env);
         switch (tco_ast.data) {
             .List => |*list| {
                 if (list.items.len == 0) {
                     return tco_ast;
                 }
                 const symbol = list.items[0].to_symbol() catch "";
-                if (std.mem.eql(u8, symbol, "def!")) {
+                if (std.mem.eql(u8, symbol, "def!") or std.mem.eql(u8, symbol, "defmacro!")) {
                     const definition = try list.items[1].to_symbol();
                     const scope_ast = try list.items[2].copy(Allocator);
                     const value = try EVAL(scope_ast, repl_env);
+                    switch (value.data) {
+                        .DefFun => |*def_fun| {
+                            if (std.mem.eql(u8, symbol, "defmacro!")) def_fun.is_macro = true;
+                        },
+                        else => {},
+                    }
                     try tco_env.set(definition, value);
                     tco_ast.destroy(Allocator);
                     return value.copy(Allocator);
@@ -197,6 +248,11 @@ fn EVAL(ast: *MalType, repl_env: *Env) MalErr!*MalType {
                     tco_ast.destroy(Allocator);
                     tco_ast = try quasiquote(quote);
                     continue;
+                } else if (std.mem.eql(u8, symbol, "macroexpand")) {
+                    (try tco_ast.seq_pop(0)).destroy(Allocator);
+                    const macro = try tco_ast.seq_pop(0);
+                    const expanded_ast = macroexpand(macro, tco_env);
+                    return expanded_ast;
                 } else if (std.mem.eql(u8, symbol, "do")) {
                     const rest = try tco_ast.rest();
                     const last = try rest.last();
@@ -230,6 +286,7 @@ fn EVAL(ast: *MalType, repl_env: *Env) MalErr!*MalType {
                             tco_ast = def_fun.body;
                             const arg_vars = try def_fun.args.to_linked_list();
                             const scope_args = arg_vars.toOwnedSlice() catch return MalErr.OutOfMemory;
+                            defer Allocator.free(scope_args);
                             tco_env = try Env.init(Allocator, def_fun.env, scope_args, evaluated_list.items[1..]);
                             continue;
                         },
@@ -237,7 +294,7 @@ fn EVAL(ast: *MalType, repl_env: *Env) MalErr!*MalType {
                             return apply(evaluated_list);
                         },
                         else => {
-                            std.debug.print("Cannot evaluate non-function symbol\n", .{});
+                            std.debug.print("Cannot evaluate non-function symbol.\n", .{});
                             return MalErr.TypeError;
                         },
                     }
@@ -301,6 +358,13 @@ fn init_env(args: [][]u8) MalErr!*Env {
         \\(def! load-file (fn* (f) (eval (read-string (str "(do " (slurp f) "\nnil)")))))
     ;
     output = try rep(def_load_file);
+    Allocator.free(output);
+
+    const cond =
+        \\(defmacro! cond (fn* (& xs) (if (> (count xs) 0) (list 'if (first xs) (if (> (count xs) 1) (nth xs 1) (throw \"odd number of forms to cond\")) (cons 'cond (rest (rest xs)))))))
+    ;
+    // catch is due to the throw implementation missing ATM
+    output = rep(cond) catch "";
     Allocator.free(output);
 
     return builtin_env;

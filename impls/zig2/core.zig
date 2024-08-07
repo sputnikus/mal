@@ -324,6 +324,51 @@ fn vec(args: []*MalType) MalErr!*MalType {
     }
 }
 
+fn nth(args: []*MalType) MalErr!*MalType {
+    const args_len = args.len;
+    if (args_len < 2) return MalErr.InvalidArgs;
+    switch (args[0].data) {
+        .List, .Vector => {
+            const index = switch (args[1].data) {
+                .Int => |i| i,
+                else => return MalErr.TypeError,
+            };
+            return args[0].seq_pop(@intCast(index));
+        },
+        else => return MalErr.TypeError,
+    }
+}
+
+fn first(args: []*MalType) MalErr!*MalType {
+    const args_len = args.len;
+    if (args_len < 1) return MalErr.InvalidArgs;
+    switch (args[0].data) {
+        .List, .Vector => {
+            return args[0].seq_pop(0) catch |err| switch (err) {
+                MalErr.OutOfBounds => MalType.init(Allocator),
+                else => err,
+            };
+        },
+        .Nil => return MalType.init(Allocator),
+        else => return MalErr.TypeError,
+    }
+}
+
+fn rest(args: []*MalType) MalErr!*MalType {
+    const args_len = args.len;
+    if (args_len < 1) return MalErr.InvalidArgs;
+    switch (args[0].data) {
+        .List, .Vector => {
+            return args[0].rest() catch |err| switch (err) {
+                MalErr.OutOfBounds => MalType.new_list(Allocator, MalLinkedList.init(Allocator)),
+                else => err,
+            };
+        },
+        .Nil => return MalType.new_list(Allocator, MalLinkedList.init(Allocator)),
+        else => return MalErr.TypeError,
+    }
+}
+
 pub const NamespaceMapping = struct {
     name: []const u8,
     func: MalFun,
@@ -365,4 +410,9 @@ pub const ns = [_]NamespaceMapping{
     NamespaceMapping{ .name = "cons", .func = &cons },
     NamespaceMapping{ .name = "concat", .func = &concat },
     NamespaceMapping{ .name = "vec", .func = &vec },
+
+    // step 8 deferrable functions
+    NamespaceMapping{ .name = "nth", .func = &nth },
+    NamespaceMapping{ .name = "first", .func = &first },
+    NamespaceMapping{ .name = "rest", .func = &rest },
 };
