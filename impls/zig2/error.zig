@@ -8,6 +8,7 @@ pub const MalErr = error{
     OutOfBounds,
     OutOfMemory,
     Overflow,
+    ThrowExcp,
     TypeError,
     UnmatchedParen,
     UnmatchedString,

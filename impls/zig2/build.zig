@@ -70,6 +70,12 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        b.addExecutable(.{
+            .name = "step9_try",
+            .root_source_file = b.path("step9_try.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     };
 
     for (exes) |exe| {
