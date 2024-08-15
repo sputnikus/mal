@@ -117,10 +117,10 @@ fn init_env() MalErr!*MalHashMap {
     builtin_env.* = MalHashMap.init(Allocator);
 
     const mapping = [_]struct { []const u8, *const fn (args: []*MalType) MalErr!*MalType }{
-        .{ "+", &builtins.add_int },
-        .{ "-", &builtins.sub_int },
-        .{ "*", &builtins.mul_int },
-        .{ "/", &builtins.div_int },
+        .{ "+", &builtins.addInt },
+        .{ "-", &builtins.subInt },
+        .{ "*", &builtins.mulInt },
+        .{ "/", &builtins.divInt },
     };
 
     for (mapping) |fun_pair| {

@@ -2,6 +2,7 @@ const std = @import("std");
 const math = std.math;
 const mem = std.mem;
 const Allocator = std.heap.c_allocator;
+const milliTimestamp = std.time.milliTimestamp;
 
 const MalErr = @import("error.zig").MalErr;
 const MalFun = @import("types.zig").MalFun;
@@ -12,8 +13,9 @@ const MalTypeValue = @import("types.zig").MalTypeValue;
 const apply = @import("types.zig").apply;
 const printer = @import("printer.zig");
 const read_str = @import("reader.zig").read_str;
+const getprompt = @import("readline.zig").getprompt;
 
-pub fn add_int(args: []*MalType) MalErr!*MalType {
+pub fn addInt(args: []*MalType) MalErr!*MalType {
     if (args.len < 2) return MalErr.InvalidArgs;
     const x = try args[0].to_int();
     const y = try args[1].to_int();
@@ -21,7 +23,7 @@ pub fn add_int(args: []*MalType) MalErr!*MalType {
     return MalType.new_int(Allocator, res);
 }
 
-pub fn sub_int(args: []*MalType) MalErr!*MalType {
+pub fn subInt(args: []*MalType) MalErr!*MalType {
     if (args.len < 2) return MalErr.InvalidArgs;
     const x = try args[0].to_int();
     const y = try args[1].to_int();
@@ -29,7 +31,7 @@ pub fn sub_int(args: []*MalType) MalErr!*MalType {
     return MalType.new_int(Allocator, res);
 }
 
-pub fn mul_int(args: []*MalType) MalErr!*MalType {
+pub fn mulInt(args: []*MalType) MalErr!*MalType {
     if (args.len < 2) return MalErr.InvalidArgs;
     const x = try args[0].to_int();
     const y = try args[1].to_int();
@@ -38,7 +40,7 @@ pub fn mul_int(args: []*MalType) MalErr!*MalType {
 }
 
 // floored division
-pub fn div_int(args: []*MalType) MalErr!*MalType {
+pub fn divInt(args: []*MalType) MalErr!*MalType {
     if (args.len < 2) return MalErr.InvalidArgs;
     const x = try args[0].to_int();
     const y = try args[1].to_int();
@@ -383,7 +385,7 @@ fn rest(args: []*MalType) MalErr!*MalType {
     }
 }
 
-fn core_apply(args: []*MalType) MalErr!*MalType {
+fn coreApply(args: []*MalType) MalErr!*MalType {
     if (args.len < 2) return MalErr.InvalidArgs;
     // TODO check if last argument is List/Vector
     var apply_args = MalLinkedList.init(Allocator);
@@ -513,6 +515,7 @@ fn toHashMap(args: []*MalType) MalErr!*MalType {
 }
 
 fn isHashMap(args: []*MalType) MalErr!*MalType {
+    if (args.len < 1) return MalErr.InvalidArgs;
     return MalType.new_bool(Allocator, args[0].data == MalTypeValue.HashMap);
 }
 
@@ -605,16 +608,132 @@ fn listHashMapValues(args: []*MalType) MalErr!*MalType {
     return MalType.new_list(Allocator, value_list);
 }
 
+fn coreReadline(args: []*MalType) MalErr!*MalType {
+    if (args.len < 1) return MalErr.InvalidArgs;
+    const user_prompt = args[0].to_string() catch return MalErr.InvalidArgs;
+    const opt_line = getprompt(Allocator, user_prompt) catch return MalErr.IOError;
+    if (opt_line) |line| {
+        return MalType.new_string(Allocator, line);
+    }
+    return MalType.init(Allocator);
+}
+
+fn getMeta(args: []*MalType) MalErr!*MalType {
+    if (args.len < 1) return MalErr.InvalidArgs;
+    switch (args[0].data) {
+        .Fun, .DefFun, .List, .Vector, .HashMap => {
+            if (args[0].meta) |meta| return meta
+            else return MalType.init(Allocator);
+        },
+        else => return MalErr.InvalidArgs,
+    }
+}
+
+fn withMeta(args: []*MalType) MalErr!*MalType {
+    if (args.len < 2) return MalErr.InvalidArgs;
+    switch (args[0].data) {
+        .Fun, .DefFun, .List, .Vector, .HashMap => {
+            var type_copy = try args[0].copy(Allocator);
+            type_copy.meta = args[1];
+            return type_copy;
+        },
+        else => return MalErr.InvalidArgs,
+    }
+}
+
+fn getEpoch(args: []*MalType) MalErr!*MalType {
+    if (args.len > 1) return MalErr.InvalidArgs;
+    return MalType.new_int(Allocator, milliTimestamp());
+}
+
+fn conj(args: []*MalType) MalErr!*MalType {
+    if (args.len < 1) return MalErr.InvalidArgs;
+    switch (args[0].data) {
+        .List => |linked_list| {
+            var new_list = linked_list.clone() catch return MalErr.OutOfMemory;
+            errdefer new_list.deinit();
+            for (args[1..]) |elem| {
+                new_list.insert(0, elem) catch return MalErr.OutOfMemory;
+            }
+            return MalType.new_list(Allocator, new_list);
+        },
+        .Vector => |vector| {
+            var new_vector = vector.clone() catch return MalErr.OutOfMemory;
+            errdefer new_vector.deinit();
+            for (args[1..]) |elem| {
+                new_vector.append(elem) catch return MalErr.OutOfMemory;
+            }
+            return MalType.new_vector(Allocator, new_vector);
+        },
+        else => return MalErr.InvalidArgs,
+    }
+}
+
+fn isString(args: []*MalType) MalErr!*MalType {
+    if (args.len < 1) return MalErr.InvalidArgs;
+    return MalType.new_bool(Allocator, args[0].data == MalTypeValue.String);
+}
+
+fn isNumber(args: []*MalType) MalErr!*MalType {
+    if (args.len < 1) return MalErr.InvalidArgs;
+    return MalType.new_bool(Allocator, args[0].data == MalTypeValue.Int);
+}
+
+fn isFunction(args: []*MalType) MalErr!*MalType {
+    if (args.len < 1) return MalErr.InvalidArgs;
+    return switch (args[0].data) {
+        .DefFun => |def_fun| MalType.new_bool(Allocator, !def_fun.is_macro),
+        .Fun => MalType.new_bool(Allocator, true),
+        else => MalType.new_bool(Allocator, false),
+    };
+}
+
+fn isMacro(args: []*MalType) MalErr!*MalType {
+    if (args.len < 1) return MalErr.InvalidArgs;
+    return switch (args[0].data) {
+        .DefFun => |def_fun| MalType.new_bool(Allocator, def_fun.is_macro),
+        else => MalType.new_bool(Allocator, false),
+    };
+}
+
+fn toList(args: []*MalType) MalErr!*MalType {
+    if (args.len < 1) return MalErr.InvalidArgs;
+    switch (args[0].data) {
+        .List => |linked_list| {
+            if (linked_list.items.len == 0) return MalType.init(Allocator);
+            return args[0];
+        },
+        .Vector => |vector| {
+            if (vector.items.len == 0) return MalType.init(Allocator);
+            var new_list = vector.clone() catch return MalErr.OutOfMemory;
+            errdefer new_list.deinit();
+            return MalType.new_list(Allocator, new_list);
+        },
+        .String => |string| {
+            if (string.len == 0) return MalType.init(Allocator);
+            var new_list = MalLinkedList.init(Allocator);
+            errdefer new_list.deinit();
+            var iter = std.mem.window(u8, string, 1, 1);
+            while (iter.next()) |char| {
+                new_list.append(try MalType.new_string(Allocator, char)) catch return MalErr.OutOfMemory;
+            }
+            return MalType.new_list(Allocator, new_list);
+        },
+        .Nil => return args[0],
+        else => return MalErr.InvalidArgs,
+    }
+}
+
 pub const NamespaceMapping = struct {
     name: []const u8,
     func: MalFun,
 };
 
 pub const ns = [_]NamespaceMapping{
-    NamespaceMapping{ .name = "+", .func = &add_int },
-    NamespaceMapping{ .name = "-", .func = &sub_int },
-    NamespaceMapping{ .name = "*", .func = &mul_int },
-    NamespaceMapping{ .name = "/", .func = &div_int },
+    NamespaceMapping{ .name = "+", .func = &addInt },
+    NamespaceMapping{ .name = "-", .func = &subInt },
+    NamespaceMapping{ .name = "*", .func = &mulInt },
+    NamespaceMapping{ .name = "/", .func = &divInt },
 
     // step 4 core functions
     NamespaceMapping{ .name = "list", .func = &list },
@@ -653,7 +772,7 @@ pub const ns = [_]NamespaceMapping{
     NamespaceMapping{ .name = "rest", .func = &rest },
 
     // step 9 core functions
-    NamespaceMapping{ .name = "apply", .func = &core_apply },
+    NamespaceMapping{ .name = "apply", .func = &coreApply },
     NamespaceMapping{ .name = "map", .func = &map },
     NamespaceMapping{ .name = "nil?", .func = &isNil },
     NamespaceMapping{ .name = "true?", .func = &isTrue },
@@ -675,4 +794,18 @@ pub const ns = [_]NamespaceMapping{
     NamespaceMapping{ .name = "contains?", .func = &isHashMapKey },
     NamespaceMapping{ .name = "keys", .func = &listHashMapKeys },
     NamespaceMapping{ .name = "vals", .func = &listHashMapValues },
+
+    // step A core functions
+    NamespaceMapping{ .name = "readline", .func = &coreReadline },
+
+    // step A optional functions
+    NamespaceMapping{ .name = "meta", .func = &getMeta },
+    NamespaceMapping{ .name = "with-meta", .func = &withMeta },
+    NamespaceMapping{ .name = "time-ms", .func = &getEpoch },
+    NamespaceMapping{ .name = "conj", .func = &conj },
+    NamespaceMapping{ .name = "string?", .func = &isString },
+    NamespaceMapping{ .name = "number?", .func = &isNumber },
+    NamespaceMapping{ .name = "fn?", .func = &isFunction },
+    NamespaceMapping{ .name = "macro?", .func = &isMacro },
+    NamespaceMapping{ .name = "seq", .func = &toList },
 };

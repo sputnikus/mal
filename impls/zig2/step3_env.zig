@@ -145,10 +145,10 @@ fn init_env() MalErr!*Env {
     var builtin_env = global_repl_env;
 
     const mapping = [_]struct { []const u8, *const fn (args: []*MalType) MalErr!*MalType }{
-        .{ "+", &builtins.add_int },
-        .{ "-", &builtins.sub_int },
-        .{ "*", &builtins.mul_int },
-        .{ "/", &builtins.div_int },
+        .{ "+", &builtins.addInt },
+        .{ "-", &builtins.subInt },
+        .{ "*", &builtins.mulInt },
+        .{ "/", &builtins.divInt },
     };
 
     for (mapping) |fun_pair| {
