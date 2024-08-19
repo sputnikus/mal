@@ -40,9 +40,9 @@ pub fn getline(allocator: Allocator) !?[]u8 {
 
 // Same as getline but we are providing user input
 pub fn getprompt(allocator: Allocator, prompt: []const u8) !?[]u8 {
-    const null_terminated_prompt = try allocator.alloc(u8, prompt.len);
+    const null_terminated_prompt = try allocator.alloc(u8, prompt.len + 1);
     defer allocator.free(null_terminated_prompt);
-    for (null_terminated_prompt) |*d| d.* = 0;
+    @memset(null_terminated_prompt, 0);
     std.mem.copyForwards(u8, null_terminated_prompt, prompt);
     const input: ?[*] u8 = readline.readline(null_terminated_prompt.ptr);
     if(input) |actual| {

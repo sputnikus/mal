@@ -413,7 +413,6 @@ fn map(args: []*MalType) MalErr!*MalType {
         defer apply_args.deinit();
         apply_args.append(try map_fn.copy(Allocator)) catch return MalErr.OutOfMemory;
         apply_args.append(elem) catch return MalErr.OutOfMemory;
-        std.debug.print("Map payload: {any}\n", .{apply_args.items});
         map_results.append(try apply(&apply_args)) catch return MalErr.OutOfMemory;
     }
     return MalType.new_list(Allocator, map_results);

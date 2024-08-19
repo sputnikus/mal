@@ -134,7 +134,8 @@ fn eval_ast(ast: *MalType, repl_env: *Env) MalErr!*MalType {
             defer ast.destroy(Allocator);
             const replacement = repl_env.get(symbol) catch |err| {
                 var excp_string = ArrayList(u8).init(Allocator);
-                try std.fmt.format(excp_string.writer(), "'{s}' not found", .{symbol});
+                errdefer excp_string.deinit();
+                std.fmt.format(excp_string.writer(), "'{s}' not found", .{symbol}) catch return MalErr.OutOfMemory;
                 var throw_args = [_]*MalType{try MalType.new_string(Allocator, excp_string.toOwnedSlice() catch return MalErr.OutOfMemory)};
                 _ = try throw(&throw_args);
                 return err;
@@ -271,11 +272,14 @@ fn EVAL(ast: *MalType, repl_env: *Env) MalErr!*MalType {
                         .Nil => false,
                         else => true,
                     };
+                    var result = try MalType.init(Allocator);
                     if (branch) {
-                        tco_ast = try list.items[2].copy(Allocator);
+                        result = try list.items[2].copy(Allocator);
                     } else if (list.items.len >= 4) {
-                        tco_ast = try list.items[3].copy(Allocator);
+                        result = try list.items[3].copy(Allocator);
                     }
+                    tco_ast.destroy(Allocator);
+                    tco_ast = result;
                     continue;
                 } else if (std.mem.eql(u8, symbol, "try*")) {
                     defer tco_ast.destroy(Allocator);
@@ -286,6 +290,14 @@ fn EVAL(ast: *MalType, repl_env: *Env) MalErr!*MalType {
                         switch (err) {
                             MalErr.ThrowExcp => {
                                 // user exception is set in env already
+                            },
+                            MalErr.UnmatchedParen => {
+                                const mal_excp = try MalType.new_string(Allocator, "Expected closing paren, got EOF\n");
+                                try tco_env.set("__excp", mal_excp);
+                            },
+                            MalErr.UnmatchedString => {
+                                const mal_excp = try MalType.new_string(Allocator, "Expected closing quote, got EOF\n");
+                                try tco_env.set("__excp", mal_excp);
                             },
                             else => {
                                 // intepreter builtin error handling
@@ -333,8 +345,9 @@ fn EVAL(ast: *MalType, repl_env: *Env) MalErr!*MalType {
                             return apply(evaluated_list);
                         },
                         else => {
-                            std.debug.print("Cannot evaluate non-function symbol.\n", .{});
-                            return MalErr.TypeError;
+                            var throw_args = [_]*MalType{try MalType.new_string(Allocator, "Cannot apply non-function symbol")};
+                            _ = try throw(&throw_args);
+                            return evaluated;
                         },
                     }
                 }
@@ -422,6 +435,30 @@ fn init_env(args: [][]u8) MalErr!*Env {
     return builtin_env;
 }
 
+fn handleRep(input: []const u8) ?[]const u8 {
+    return rep(input) catch |err| {
+        switch (err) {
+            MalErr.ThrowExcp => {
+                std.debug.print("Exception: ", .{});
+                const excp_mal = global_repl_env.get("__excp") catch {
+                    std.debug.print("Exception was lost.\n", .{});
+                    return null;
+                };
+                const warning = PRINT(excp_mal) catch {
+                    std.debug.print("Exception cannot be printed.\n", .{});
+                    return null;
+                };
+                std.debug.print("{s}\n", .{warning});
+                Allocator.free(warning);
+            },
+            else => {
+                std.debug.print("Exception: {s}\n", .{@errorName(err)});
+            },
+        }
+        return null;
+    };
+}
+
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
 
@@ -438,7 +475,7 @@ pub fn main() !void {
         try std.fmt.format(run_cmd.writer(), "(load-file \"{s}\")", .{args[1]});
         const line = try run_cmd.toOwnedSlice();
         defer Allocator.free(line);
-        _ = try rep(line);
+        _ = handleRep(line);
         return;
     }
 
@@ -451,28 +488,7 @@ pub fn main() !void {
     while (true) {
         const line = (try getline(Allocator)) orelse break;
         defer Allocator.free(line);
-        const output = rep(line) catch |err| {
-            switch (err) {
-                MalErr.ThrowExcp => {
-                    std.debug.print("Exception: ", .{});
-                    const excp_mal = env.get("__excp") catch {
-                        std.debug.print("Exception was lost.\n", .{});
-                        break;
-                    };
-                    const warning = PRINT(excp_mal) catch {
-                        std.debug.print("Exception cannot be printed.\n", .{});
-                        break;
-                    };
-                    std.debug.print("{s}\n", .{warning});
-                    Allocator.free(warning);
-                    continue;
-                },
-                else => {
-                    std.debug.print("Exception: {s}\n", .{@errorName(err)});
-                    continue;
-                },
-            }
-        };
+        const output = handleRep(line) orelse continue;
         try stdout.print("{s}\n", .{output});
         Allocator.free(output);
     }
